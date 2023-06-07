@@ -1,0 +1,2 @@
+sshkeyboard==2.3.1
+python-can==4.2.1
