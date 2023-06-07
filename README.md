@@ -16,3 +16,10 @@ You can simply do:
 ```bash
 ./science.py
 ```
+
+The script will ask for the position of the first cup. If the rover has just turned on, then this is 0. If the lazy susan has been moved around before this script is run, then you should input whatever the position was last set to.
+
+Controls
+- up/down controls drill arm
+- w/s controls drill
+- left/right will move the lazy susan by one slot in the corresponding direction
