@@ -61,6 +61,13 @@ def move_cup(bus: can.Bus, cup_idx):
     bus.send(message)
 
 
+def set_motor_pwm_mode(bus: can.Bus, serial):
+    can_id = construct_science_can_id(serial)
+    data = [0x0, 0x0]
+    message = can.Message(arbitration_id=can_id, is_extended_id=False, data=data)
+    bus.send(message)
+
+
 def set_motor_power(bus: can.Bus, serial, power):
     if serial in can_resend_tasks:
         can_resend_tasks[serial].stop()
@@ -129,6 +136,8 @@ async def main():
             print("Invalid input! Try again.")
 
     with get_bus(args) as bus:
+        set_motor_pwm_mode(bus, DRILL_ARM_SERIAL)
+        set_motor_pwm_mode(bus, DRILL_SERIAL)
         press_callback = functools.partial(key_pressed, args, bus)
         release_callback = functools.partial(key_released, args, bus)
         await sshkeyboard.listen_keyboard_manual(
