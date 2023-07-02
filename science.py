@@ -12,10 +12,11 @@ N_SLOTS = 12
 DRILL_ARM_POWER = 0.5
 DRILL_POWER = 1.0
 
+MOTOR_GROUP = 0x4
 SCIENCE_GROUP = 0x7
 SCIENCE_SERIAL = 0x1
-DRILL_ARM_SERIAL = 0x2
-DRILL_SERIAL = 0x3
+DRILL_ARM_SERIAL = 0xC
+DRILL_SERIAL = 0xD
 
 # associates serial with cyclic send task
 can_resend_tasks: typing.Dict[int, can.CyclicSendTaskABC] = {}
@@ -35,9 +36,10 @@ class MockBus(can.BusABC):
         return None
 
 
-def construct_science_can_id(serial):
+def construct_can_id(group, serial):
     assert serial == (0b111111 & serial)
-    return (1 << 10) | (SCIENCE_GROUP << 6) | serial
+    assert group == (0b1111 & group)
+    return (1 << 10) | (group << 6) | serial
 
 
 def construct_pwm_packet_data(power):
@@ -56,14 +58,7 @@ def move_cup(bus: can.Bus, cup_idx):
     print(f"Moving first cup to slot {first_cup_idx}")
     assert cup_idx == (cup_idx & 0xFF)
     data = [0xC, cup_idx]
-    can_id = construct_science_can_id(SCIENCE_SERIAL)
-    message = can.Message(arbitration_id=can_id, is_extended_id=False, data=data)
-    bus.send(message)
-
-
-def set_motor_pwm_mode(bus: can.Bus, serial):
-    can_id = construct_science_can_id(serial)
-    data = [0x0, 0x0]
+    can_id = construct_can_id(SCIENCE_GROUP, SCIENCE_SERIAL)
     message = can.Message(arbitration_id=can_id, is_extended_id=False, data=data)
     bus.send(message)
 
@@ -72,12 +67,20 @@ def set_motor_power(bus: can.Bus, serial, power):
     if serial in can_resend_tasks:
         can_resend_tasks[serial].stop()
         del can_resend_tasks[serial]
-    can_id = construct_science_can_id(serial)
+    can_id = construct_can_id(MOTOR_GROUP, serial)
     data = construct_pwm_packet_data(power)
     message = can.Message(arbitration_id=can_id, is_extended_id=False, data=data)
     if power != 0.0:
         can_resend_tasks[serial] = bus.send_periodic(message, 0.5, store_task=False)
     else:
+        bus.send(message)
+
+
+def init_motors(bus: can.Bus):
+    for serial in [DRILL_ARM_SERIAL, DRILL_SERIAL]:
+        can_id = construct_can_id(MOTOR_GROUP, serial)
+        data = [0x0, 0x0]
+        message = can.Message(arbitration_id=can_id, is_extended_id=False, data=data)
         bus.send(message)
 
 
@@ -136,8 +139,7 @@ async def main():
             print("Invalid input! Try again.")
 
     with get_bus(args) as bus:
-        set_motor_pwm_mode(bus, DRILL_ARM_SERIAL)
-        set_motor_pwm_mode(bus, DRILL_SERIAL)
+        init_motors(bus)
         press_callback = functools.partial(key_pressed, args, bus)
         release_callback = functools.partial(key_released, args, bus)
         await sshkeyboard.listen_keyboard_manual(
