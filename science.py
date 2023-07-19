@@ -18,6 +18,8 @@ SCIENCE_SERIAL = 0x1
 DRILL_ARM_SERIAL = 0xC
 DRILL_SERIAL = 0xD
 
+DRILL_COVER_SERVO_ID = 0x5
+
 # associates serial with cyclic send task
 can_resend_tasks: typing.Dict[int, can.CyclicSendTaskABC] = {}
 
@@ -52,6 +54,14 @@ def get_args():
     parser.add_argument("--nocan", action="store_true")
     parser.add_argument("--debug", action="store_true")
     return parser.parse_args()
+
+
+def set_servo_pos(bus: can.Bus, servo_id, pos):
+    assert isinstance(pos, int) and pos > 0 and (0xFF & pos) == pos
+    data = [0x0D, servo_id, pos]
+    can_id = construct_can_id(SCIENCE_GROUP, SCIENCE_SERIAL)
+    message = can.Message(arbitration_id=can_id, is_extended_id=False, data=data)
+    bus.send(message)
 
 
 def move_cup(bus: can.Bus, cup_idx):
@@ -94,6 +104,8 @@ async def key_pressed(args, bus: can.Bus, key: str):
     elif key == "w" or key == "s":
         power = DRILL_POWER * (1 if key == "w" else -1)
         set_motor_power(bus, DRILL_SERIAL, power)
+    elif key == "a" or key == "d":
+        set_servo_pos(bus, DRILL_COVER_SERVO_ID, 90 if key == "a" else 180)
     elif key == "right":
         first_cup_idx += 1
         if first_cup_idx == N_SLOTS:

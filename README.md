@@ -22,4 +22,5 @@ The script will ask for the position of the first cup. If the rover has just tur
 Controls
 - up/down controls drill arm
 - w/s controls drill
+- a/d controls the drill cover
 - left/right will move the lazy susan by one slot in the corresponding direction
