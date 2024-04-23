@@ -11,14 +11,14 @@ import sshkeyboard
 N_SLOTS = 12
 DRILL_ARM_POWER = 0.5
 DRILL_POWER = 1.0
-
+CONVEYOR_BELT_POWER = 0x10000
+DRILL_COVER_SERVO_ID = 0x5
 MOTOR_GROUP = 0x4
 SCIENCE_GROUP = 0x7
 SCIENCE_SERIAL = 0x1
 DRILL_ARM_SERIAL = 0xC
 DRILL_SERIAL = 0xD
-
-DRILL_COVER_SERVO_ID = 0x5
+CONVEYOR_BELT_SERIAL = 0x10000
 
 # associates serial with cyclic send task
 can_resend_tasks: typing.Dict[int, can.CyclicSendTaskABC] = {}
@@ -47,7 +47,7 @@ def construct_can_id(group, serial):
 def construct_pwm_packet_data(power):
     power_int = int(round((2**15 - 1) * power))
     return [0x3, 0xFF & (power_int >> 8), 0xFF & power_int]
-
+ 
 
 def get_args():
     parser = argparse.ArgumentParser()
@@ -64,7 +64,7 @@ def set_servo_pos(bus: can.Bus, servo_id, pos):
     bus.send(message)
 
 
-def move_cup(bus: can.Bus, cup_idx):
+def move_cup(bus: can.Bus, cup_idx):   
     print(f"Moving first cup to slot {first_cup_idx}")
     assert cup_idx == (cup_idx & 0xFF)
     data = [0xC, cup_idx]
@@ -86,13 +86,21 @@ def set_motor_power(bus: can.Bus, serial, power):
         bus.send(message)
 
 
+"""TODO: def get_sensor_reading(bus: can.Bus, serial):
+    #construct can packet
+    can_id = construct_can_id(SCIENCE_GROUP, serial)
+    #send can packet to sensor
+
+    #pull sensor can packet and read
+    #print sensor reading to console"""
+
+
 def init_motors(bus: can.Bus):
-    for serial in [DRILL_ARM_SERIAL, DRILL_SERIAL]:
+    for serial in [DRILL_ARM_SERIAL, DRILL_SERIAL, CONVEYOR_BELT_SERIAL]:
         can_id = construct_can_id(MOTOR_GROUP, serial)
         data = [0x0, 0x0]
         message = can.Message(arbitration_id=can_id, is_extended_id=False, data=data)
         bus.send(message)
-
 
 async def key_pressed(args, bus: can.Bus, key: str):
     global first_cup_idx
@@ -106,6 +114,9 @@ async def key_pressed(args, bus: can.Bus, key: str):
         set_motor_power(bus, DRILL_SERIAL, power)
     elif key == "a" or key == "d":
         set_servo_pos(bus, DRILL_COVER_SERVO_ID, 90 if key == "a" else 180)
+    elif key == "u" or key == "j":
+        power = CONVEYOR_BELT_POWER * (1 if key == "u" else -1)
+        set_motor_power(bus, CONVEYOR_BELT_SERIAL, power)
     elif key == "right":
         first_cup_idx += 1
         if first_cup_idx == N_SLOTS:
@@ -117,7 +128,6 @@ async def key_pressed(args, bus: can.Bus, key: str):
             first_cup_idx = N_SLOTS - 1
         move_cup(bus, first_cup_idx)
 
-
 async def key_released(args, bus, key):
     if args.debug:
         print(f"Released: {key}")
@@ -125,6 +135,8 @@ async def key_released(args, bus, key):
         set_motor_power(bus, DRILL_ARM_SERIAL, 0.0)
     elif key == "w" or key == "s":
         set_motor_power(bus, DRILL_SERIAL, 0.0)
+    elif key == "u" or key == "j":
+        set_motor_power(bus, CONVEYOR_BELT_SERIAL, 0.0)
 
 
 @contextmanager
