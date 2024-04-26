@@ -11,7 +11,7 @@ import sshkeyboard
 N_SLOTS = 12
 DRILL_ARM_POWER = 0.5
 DRILL_POWER = 1.0
-CONVEYOR_BELT_POWER = 0x10000
+CONVEYOR_BELT_POWER = 0.5
 DRILL_COVER_SERVO_ID = 0x5
 MOTOR_GROUP = 0x4
 SCIENCE_GROUP = 0x7
@@ -25,7 +25,6 @@ can_resend_tasks: typing.Dict[int, can.CyclicSendTaskABC] = {}
 
 # position of the first cup, in the range [0, N_SLOTS)
 first_cup_idx = None
-
 
 class MockBus(can.BusABC):
     def __init__(self):
@@ -64,7 +63,7 @@ def set_servo_pos(bus: can.Bus, servo_id, pos):
     bus.send(message)
 
 
-def move_cup(bus: can.Bus, cup_idx):   
+def move_cup(bus: can.Bus, cup_idx):
     print(f"Moving first cup to slot {first_cup_idx}")
     assert cup_idx == (cup_idx & 0xFF)
     data = [0xC, cup_idx]
