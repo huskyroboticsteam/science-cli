@@ -8,23 +8,41 @@ from contextlib import contextmanager
 import can
 import sshkeyboard
 
-N_SLOTS = 12
+N_SLOTS = 18
+CONVEYOR_BELT_PIVOTS = 100
+
 DRILL_ARM_POWER = 0.5
 DRILL_POWER = 1.0
-CONVEYOR_BELT_POWER = 0.5
-DRILL_COVER_SERVO_ID = 0x5
+CONVEYOR_BELT_POWER = 1
+
+CONVEYOR_BELT_ANGLE = (360 / CONVEYOR_BELT_PIVOTS)
+LAZY_SUSAN_ANGLE = (360/N_SLOTS)
 MOTOR_GROUP = 0x4
 SCIENCE_GROUP = 0x7
 SCIENCE_SERIAL = 0x1
 DRILL_ARM_SERIAL = 0xC
 DRILL_SERIAL = 0xD
-CONVEYOR_BELT_SERIAL = 0x10000
+
+SCIENCE_SERVO_CONT = 0x0E
+SCIENCE_SERVO_SET = 0x0D
+
+CAN_CONVEYOR_BELT_CONT = 0x10000
+CAN_CONVEYOR_BELT_PIVOT = 0x10001
+CAN_SCIENCE_SERVO_LAZY_SUSAN = 0x0
+
+# conveyor belt pivot servo positions
+# conveyor belt continuous turn
+# lazy susan find fixed positions on continuous servo
 
 # associates serial with cyclic send task
 can_resend_tasks: typing.Dict[int, can.CyclicSendTaskABC] = {}
 
 # position of the first cup, in the range [0, N_SLOTS)
 first_cup_idx = None
+first_cup_pos = None
+
+conveyor_belt_idx = None
+conveyor_belt_pivot = None
 
 class MockBus(can.BusABC):
     def __init__(self):
@@ -56,13 +74,20 @@ def get_args():
 
 
 def set_servo_pos(bus: can.Bus, servo_id, pos):
-    assert isinstance(pos, int) and pos > 0 and (0xFF & pos) == pos
+    assert isinstance(pos, float)
     data = [0x0D, servo_id, pos]
     can_id = construct_can_id(SCIENCE_GROUP, SCIENCE_SERIAL)
     message = can.Message(arbitration_id=can_id, is_extended_id=False, data=data)
     bus.send(message)
 
+def set_servo_power(bus: can.Bus, servo_id, power):
+    assert isinstance(power, int)
+    data = [0x0E, servo_id, power]
+    can_id = construct_can_id(SCIENCE_GROUP, SCIENCE_SERIAL)
+    message = can.Message(arbitration_id=can_id, is_extended_id=False, data=data)
+    bus.send(message)
 
+# to delete since using set_servo_power:
 def move_cup(bus: can.Bus, cup_idx):
     print(f"Moving first cup to slot {first_cup_idx}")
     assert cup_idx == (cup_idx & 0xFF)
@@ -95,7 +120,7 @@ def set_motor_power(bus: can.Bus, serial, power):
 
 
 def init_motors(bus: can.Bus):
-    for serial in [DRILL_ARM_SERIAL, DRILL_SERIAL, CONVEYOR_BELT_SERIAL]:
+    for serial in [DRILL_ARM_SERIAL, DRILL_SERIAL]:
         can_id = construct_can_id(MOTOR_GROUP, serial)
         data = [0x0, 0x0]
         message = can.Message(arbitration_id=can_id, is_extended_id=False, data=data)
@@ -111,21 +136,40 @@ async def key_pressed(args, bus: can.Bus, key: str):
     elif key == "w" or key == "s":
         power = DRILL_POWER * (1 if key == "w" else -1)
         set_motor_power(bus, DRILL_SERIAL, power)
-    elif key == "a" or key == "d":
-        set_servo_pos(bus, DRILL_COVER_SERVO_ID, 90 if key == "a" else 180)
     elif key == "u" or key == "j":
+        #continuous conveyor belt
         power = CONVEYOR_BELT_POWER * (1 if key == "u" else -1)
-        set_motor_power(bus, CONVEYOR_BELT_SERIAL, power)
+        set_servo_power(CAN_CONVEYOR_BELT_CONT, power)
+    elif key == "i":
+        #positional conveyor belt positive direction
+        conveyor_belt_idx += 1
+        conveyor_belt_pivot += CONVEYOR_BELT_ANGLE
+        if conveyor_belt_idx == CONVEYOR_BELT_PIVOTS:
+            conveyor_belt_idx = 0
+        print(f"Moving conveyor belt to position {conveyor_belt_idx}")
+        set_servo_pos(CAN_CONVEYOR_BELT_PIVOT, conveyor_belt_pivot)
+    elif key == "k":
+        #positional conveyor belt negative direction
+        conveyor_belt_idx -= 1
+        conveyor_belt_pivot -= CONVEYOR_BELT_ANGLE
+        if conveyor_belt_idx == -1:
+            conveyor_belt_idx = CONVEYOR_BELT_PIVOTS - 1
+        print(f"Moving conveyor belt to position {conveyor_belt_idx}")
+        set_servo_pos(CAN_CONVEYOR_BELT_PIVOT, conveyor_belt_pivot)
     elif key == "right":
-        first_cup_idx += 1
+        first_cup_pos += LAZY_SUSAN_ANGLE
+        first_cup_idx += 1  
         if first_cup_idx == N_SLOTS:
             first_cup_idx = 0
-        move_cup(bus, first_cup_idx)
+        print(f"Moving first cup to slot {first_cup_idx}")
+        set_servo_pos(CAN_SCIENCE_SERVO_LAZY_SUSAN, first_cup_pos)
     elif key == "left":
-        first_cup_idx -= 1
+        first_cup_pos -= LAZY_SUSAN_ANGLE
+        first_cup_idx -= 1 
         if first_cup_idx == -1:
             first_cup_idx = N_SLOTS - 1
-        move_cup(bus, first_cup_idx)
+        print(f"Moving first cup to slot {first_cup_idx}")
+        set_servo_pos(CAN_SCIENCE_SERVO_LAZY_SUSAN, first_cup_pos)
 
 async def key_released(args, bus, key):
     if args.debug:
@@ -135,7 +179,7 @@ async def key_released(args, bus, key):
     elif key == "w" or key == "s":
         set_motor_power(bus, DRILL_SERIAL, 0.0)
     elif key == "u" or key == "j":
-        set_motor_power(bus, CONVEYOR_BELT_SERIAL, 0.0)
+        set_servo_power(bus, CAN_CONVEYOR_BELT_CONT, 0)
 
 
 @contextmanager
@@ -158,6 +202,10 @@ async def main():
             if not 0 <= first_cup_idx < N_SLOTS:
                 first_cup_idx = None
                 print(f"Valid slots are in between 0 and {N_SLOTS-1}. Try again.")
+            conveyor_belt_idx= int(input("What is the position of conveyor belt? "))
+            if not 0 <= conveyor_belt_idx < CONVEYOR_BELT_PIVOTS:
+                conveyor_belt_idx = None
+                print(f"Valid indices are in between 0 and {CONVEYOR_BELT_PIVOTS-1}. Try again.")
         except ValueError:
             print("Invalid input! Try again.")
 
