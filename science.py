@@ -9,14 +9,14 @@ import can
 import sshkeyboard
 
 N_SLOTS = 18
-CONVEYOR_BELT_PIVOTS = 100
+CONVEYOR_BELT_PIVOTS = 5
 
 DRILL_ARM_POWER = 0.5
 DRILL_POWER = 1.0
-CONVEYOR_BELT_POWER = 1
+CONVEYOR_BELT_POWER = 0.5
 
 CONVEYOR_BELT_ANGLE = (360 / CONVEYOR_BELT_PIVOTS)
-LAZY_SUSAN_ANGLE = (360/N_SLOTS)
+LAZY_SUSAN_ANGLE = (360 / N_SLOTS)
 MOTOR_GROUP = 0x4
 SCIENCE_GROUP = 0x7
 SCIENCE_SERIAL = 0x1
@@ -26,8 +26,8 @@ DRILL_SERIAL = 0xD
 SCIENCE_SERVO_CONT = 0x0E
 SCIENCE_SERVO_SET = 0x0D
 
-CAN_CONVEYOR_BELT_CONT = 0x10000
-CAN_CONVEYOR_BELT_PIVOT = 0x10001
+CAN_CONVEYOR_BELT_CONT = 0x4
+CAN_CONVEYOR_BELT_PIVOT = 0x3
 CAN_SCIENCE_SERVO_LAZY_SUSAN = 0x0
 
 # conveyor belt pivot servo positions
@@ -81,8 +81,9 @@ def set_servo_pos(bus: can.Bus, servo_id, pos):
     bus.send(message)
 
 def set_servo_power(bus: can.Bus, servo_id, power):
-    assert isinstance(power, int)
-    data = [0x0E, servo_id, power]
+    assert isinstance(power, float)
+    power_int = int(round((2**15 - 1) * power))
+    data = [0x0E, servo_id, power_int]
     can_id = construct_can_id(SCIENCE_GROUP, SCIENCE_SERIAL)
     message = can.Message(arbitration_id=can_id, is_extended_id=False, data=data)
     bus.send(message)
@@ -179,7 +180,7 @@ async def key_released(args, bus, key):
     elif key == "w" or key == "s":
         set_motor_power(bus, DRILL_SERIAL, 0.0)
     elif key == "u" or key == "j":
-        set_servo_power(bus, CAN_CONVEYOR_BELT_CONT, 0)
+        set_servo_power(bus, CAN_CONVEYOR_BELT_CONT, 0.0)
 
 
 @contextmanager
