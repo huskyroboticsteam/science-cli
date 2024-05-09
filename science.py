@@ -15,8 +15,14 @@ DRILL_ARM_POWER = 0.5
 DRILL_POWER = 1.0
 CONVEYOR_BELT_POWER = 0.5
 
-CONVEYOR_BELT_ANGLE = (360 / CONVEYOR_BELT_PIVOTS)
-LAZY_SUSAN_ANGLE = (360 / N_SLOTS)
+#CONVEYOR_BELT_ANGLE = (180 / CONVEYOR_BELT_PIVOTS)
+CONVEYOR_OFFSET = 1
+CONVEYOR_SLOPE = 1
+
+#LAZY_SUSAN_ANGLE = (360 / N_SLOTS)
+LAZY_SUSAN_OFFSET = 1
+LAZY_SUSAN_SLOPE = 1
+
 MOTOR_GROUP = 0x4
 SCIENCE_GROUP = 0x7
 SCIENCE_SERIAL = 0x1
@@ -88,14 +94,14 @@ def set_servo_power(bus: can.Bus, servo_id, power):
     message = can.Message(arbitration_id=can_id, is_extended_id=False, data=data)
     bus.send(message)
 
-# to delete since using set_servo_power:
-def move_cup(bus: can.Bus, cup_idx):
+# to delete since using set_servo_pos:
+"""def move_cup(bus: can.Bus, cup_idx):
     print(f"Moving first cup to slot {first_cup_idx}")
     assert cup_idx == (cup_idx & 0xFF)
     data = [0xC, cup_idx]
     can_id = construct_can_id(SCIENCE_GROUP, SCIENCE_SERIAL)
     message = can.Message(arbitration_id=can_id, is_extended_id=False, data=data)
-    bus.send(message)
+    bus.send(message)"""
 
 
 def set_motor_power(bus: can.Bus, serial, power):
@@ -147,36 +153,32 @@ async def key_pressed(args, bus: can.Bus, key: str):
     elif key == "i":
         #positional conveyor belt positive direction
         conveyor_belt_idx += 1
-        conveyor_belt_pivot += CONVEYOR_BELT_ANGLE
         if conveyor_belt_idx == CONVEYOR_BELT_PIVOTS:
             conveyor_belt_idx = 0
-            conveyor_belt_pivot = CONVEYOR_BELT_ANGLE * conveyor_belt_idx
+        conveyor_belt_pivot = CONVEYOR_SLOPE * conveyor_belt_idx + CONVEYOR_OFFSET
         print(f"Moving conveyor belt to position {conveyor_belt_idx}")
         set_servo_pos(bus, CAN_CONVEYOR_BELT_PIVOT, int(conveyor_belt_pivot))
     elif key == "k":
         #positional conveyor belt negative direction
         conveyor_belt_idx -= 1
-        conveyor_belt_pivot -= CONVEYOR_BELT_ANGLE
         if conveyor_belt_idx == -1:
             conveyor_belt_idx = CONVEYOR_BELT_PIVOTS - 1
-            conveyor_belt_pivot = CONVEYOR_BELT_ANGLE * conveyor_belt_idx
         print(f"Moving conveyor belt to position {conveyor_belt_idx}")
+        conveyor_belt_pivot = CONVEYOR_SLOPE * conveyor_belt_idx + CONVEYOR_OFFSET
         set_servo_pos(bus, CAN_CONVEYOR_BELT_PIVOT, int(conveyor_belt_pivot))
     elif key == "right":
-        first_cup_pos += LAZY_SUSAN_ANGLE
         first_cup_idx += 1  
         if first_cup_idx == N_SLOTS:
             first_cup_idx = 0
-            first_cup_pos = LAZY_SUSAN_ANGLE * first_cup_idx
+        first_cup_pos = LAZY_SUSAN_SLOPE * first_cup_idx + LAZY_SUSAN_OFFSET
         print(f"Moving first cup to slot {first_cup_idx}")
         set_servo_pos(bus, CAN_SCIENCE_SERVO_LAZY_SUSAN, int(first_cup_pos))
     elif key == "left":
-        first_cup_pos -= LAZY_SUSAN_ANGLE
         first_cup_idx -= 1 
         if first_cup_idx == -1:
             first_cup_idx = N_SLOTS - 1
-            first_cup_pos = LAZY_SUSAN_ANGLE * first_cup_idx
         print(f"Moving first cup to slot {first_cup_idx}")
+        first_cup_pos = LAZY_SUSAN_SLOPE * first_cup_idx + LAZY_SUSAN_OFFSET
         set_servo_pos(bus, CAN_SCIENCE_SERVO_LAZY_SUSAN, int(first_cup_pos))
 
 async def key_released(args, bus, key):
@@ -213,13 +215,13 @@ async def main():
             print(conveyor_belt_idx)
             if (first_cup_idx is None):
                 first_cup_idx = int(input("What is the position of the first cup? "))
-                first_cup_pos = first_cup_idx * LAZY_SUSAN_ANGLE
+                first_cup_pos = LAZY_SUSAN_SLOPE * first_cup_idx + LAZY_SUSAN_OFFSET
                 if not 0 <= first_cup_idx < N_SLOTS:
                     first_cup_idx = None
                     print(f"Valid slots are in between 0 and {N_SLOTS-1}. Try again.")
             if (conveyor_belt_idx is None):
                 conveyor_belt_idx= int(input("What is the position of conveyor belt? "))
-                conveyor_belt_pivot = conveyor_belt_idx * CONVEYOR_BELT_ANGLE
+                conveyor_belt_pivot = CONVEYOR_SLOPE * conveyor_belt_idx + CONVEYOR_OFFSET
                 if not 0 <= conveyor_belt_idx < CONVEYOR_BELT_PIVOTS:
                     conveyor_belt_idx = None
                     print(f"Valid indices are in between 0 and {CONVEYOR_BELT_PIVOTS-1}. Try again.")
