@@ -15,13 +15,18 @@ DRILL_ARM_POWER = 0.5
 DRILL_POWER = 1.0
 CONVEYOR_BELT_POWER = 0.5
 
-#CONVEYOR_BELT_ANGLE = (180 / CONVEYOR_BELT_PIVOTS)
-CONVEYOR_OFFSET = 1
-CONVEYOR_SLOPE = 1
 
-#LAZY_SUSAN_ANGLE = (360 / N_SLOTS)
-LAZY_SUSAN_OFFSET = 1
-LAZY_SUSAN_SLOPE = 1
+#CONVEYOR_OFFSET = 10
+#CONVEYOR_SLOPE = 8
+CONVEYOR_POSITIONS = ['0', '1', '2', '3', '4', '5']
+
+LAZY_SUSAN_OFFSET = 5
+LAZY_SUSAN_SLOPE = 7
+
+SENSOR_TELEM = 0x16
+
+TELEM_PULL_ID = 0xF5
+TELEM_REQUEST_ID = 0xF6
 
 MOTOR_GROUP = 0x4
 SCIENCE_GROUP = 0x7
@@ -117,11 +122,12 @@ def set_motor_power(bus: can.Bus, serial, power):
         bus.send(message)
 
 
-"""TODO: def get_sensor_reading(bus: can.Bus, serial):
-    #construct can packet
+def get_sensor_reading(bus: can.Bus, serial):
+    # send telem pull
+    data = [TELEM_PULL_ID, SCIENCE_GROUP, SCIENCE_SERIAL, TELEM_PULL_ID]
     can_id = construct_can_id(SCIENCE_GROUP, serial)
-    #send can packet to sensor
-
+    message = can.Message(arbitration_id=can_id, is_extended_id=False, data=data)
+    bus.send(message)
     #pull sensor can packet and read
     #print sensor reading to console"""
 
@@ -153,19 +159,25 @@ async def key_pressed(args, bus: can.Bus, key: str):
     elif key == "i":
         #positional conveyor belt positive direction
         conveyor_belt_idx += 1
-        if conveyor_belt_idx == CONVEYOR_BELT_PIVOTS:
-            conveyor_belt_idx = 0
-        conveyor_belt_pivot = CONVEYOR_SLOPE * conveyor_belt_idx + CONVEYOR_OFFSET
-        print(f"Moving conveyor belt to position {conveyor_belt_idx}")
-        set_servo_pos(bus, CAN_CONVEYOR_BELT_PIVOT, int(conveyor_belt_pivot))
+        if (conveyor_belt_idx == CONVEYOR_BELT_PIVOTS):
+            print(f"Conveyor belt index out of range. Choose different index.")
+            conveyor_belt_idx = None
+            await main()
+        else:
+            conveyor_belt_pivot = int(CONVEYOR_POSITIONS[conveyor_belt_idx])
+            print(f"Moving conveyor belt to position {conveyor_belt_idx}")
+            set_servo_pos(bus, CAN_CONVEYOR_BELT_PIVOT, conveyor_belt_pivot)
     elif key == "k":
         #positional conveyor belt negative direction
         conveyor_belt_idx -= 1
-        if conveyor_belt_idx == -1:
-            conveyor_belt_idx = CONVEYOR_BELT_PIVOTS - 1
-        print(f"Moving conveyor belt to position {conveyor_belt_idx}")
-        conveyor_belt_pivot = CONVEYOR_SLOPE * conveyor_belt_idx + CONVEYOR_OFFSET
-        set_servo_pos(bus, CAN_CONVEYOR_BELT_PIVOT, int(conveyor_belt_pivot))
+        if (conveyor_belt_idx == -1):
+            print(f"Conveyor belt index out of range. Choose different index.")
+            conveyor_belt_idx = None
+            await main()
+        else:
+            print(f"Moving conveyor belt to position {conveyor_belt_idx}")
+            conveyor_belt_pivot = int(CONVEYOR_POSITIONS[conveyor_belt_idx])
+            set_servo_pos(bus, CAN_CONVEYOR_BELT_PIVOT, conveyor_belt_pivot)
     elif key == "right":
         first_cup_idx += 1  
         if first_cup_idx == N_SLOTS:
@@ -221,11 +233,12 @@ async def main():
                     print(f"Valid slots are in between 0 and {N_SLOTS-1}. Try again.")
             if (conveyor_belt_idx is None):
                 conveyor_belt_idx= int(input("What is the position of conveyor belt? "))
-                conveyor_belt_pivot = CONVEYOR_SLOPE * conveyor_belt_idx + CONVEYOR_OFFSET
                 if not 0 <= conveyor_belt_idx < CONVEYOR_BELT_PIVOTS:
                     conveyor_belt_idx = None
                     print(f"Valid indices are in between 0 and {CONVEYOR_BELT_PIVOTS-1}. Try again.")
-        except ValueError:
+                else:
+                    conveyor_belt_pivot = int(CONVEYOR_POSITIONS[conveyor_belt_idx])
+        except ValueError:  
             print("Invalid input! Try again.")
 
     with get_bus(args) as bus:
