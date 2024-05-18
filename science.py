@@ -122,13 +122,13 @@ def set_motor_power(bus: can.Bus, serial, power):
         bus.send(message)
 
 
-def get_sensor_reading(bus: can.Bus, serial):
+def get_sensor_reading(bus: can.Bus):
     # send telem pull
-    data = [TELEM_PULL_ID, SCIENCE_GROUP, SCIENCE_SERIAL, TELEM_PULL_ID]
-    can_id = construct_can_id(SCIENCE_GROUP, serial)
+    data = [TELEM_PULL_ID, SCIENCE_GROUP, SCIENCE_SERIAL, SENSOR_TELEM]
+    can_id = construct_can_id(SCIENCE_GROUP, SCIENCE_SERIAL)
     message = can.Message(arbitration_id=can_id, is_extended_id=False, data=data)
     bus.send(message)
-    #pull sensor can packet and read
+    # send telem request
     #print sensor reading to console"""
 
 
@@ -159,10 +159,8 @@ async def key_pressed(args, bus: can.Bus, key: str):
     elif key == "i":
         #positional conveyor belt positive direction
         conveyor_belt_idx += 1
-        if (conveyor_belt_idx == CONVEYOR_BELT_PIVOTS):
+        if (conveyor_belt_idx >= CONVEYOR_BELT_PIVOTS or conveyor_belt_idx < 0):
             print(f"Conveyor belt index out of range. Choose different index.")
-            conveyor_belt_idx = None
-            await main()
         else:
             conveyor_belt_pivot = int(CONVEYOR_POSITIONS[conveyor_belt_idx])
             print(f"Moving conveyor belt to position {conveyor_belt_idx}")
@@ -170,10 +168,8 @@ async def key_pressed(args, bus: can.Bus, key: str):
     elif key == "k":
         #positional conveyor belt negative direction
         conveyor_belt_idx -= 1
-        if (conveyor_belt_idx == -1):
+        if (conveyor_belt_idx >= CONVEYOR_BELT_PIVOTS or conveyor_belt_idx < 0):
             print(f"Conveyor belt index out of range. Choose different index.")
-            conveyor_belt_idx = None
-            await main()
         else:
             print(f"Moving conveyor belt to position {conveyor_belt_idx}")
             conveyor_belt_pivot = int(CONVEYOR_POSITIONS[conveyor_belt_idx])
@@ -192,6 +188,9 @@ async def key_pressed(args, bus: can.Bus, key: str):
         print(f"Moving first cup to slot {first_cup_idx}")
         first_cup_pos = LAZY_SUSAN_SLOPE * first_cup_idx + LAZY_SUSAN_OFFSET
         set_servo_pos(bus, CAN_SCIENCE_SERVO_LAZY_SUSAN, int(first_cup_pos))
+    elif key == "1":
+        print(f"receiving sensor reading for _")
+        get_sensor_reading(bus)
 
 async def key_released(args, bus, key):
     if args.debug:
@@ -202,7 +201,6 @@ async def key_released(args, bus, key):
         set_motor_power(bus, DRILL_SERIAL, 0.0)
     elif key == "u" or key == "j":
         set_servo_power(bus, CAN_CONVEYOR_BELT_CONT, 0)
-
 
 @contextmanager
 def get_bus(args):
@@ -251,6 +249,7 @@ async def main():
             sequential=True,
             delay_second_char=0.05,
         )
+
 
 
 if __name__ == "__main__":
