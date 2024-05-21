@@ -13,15 +13,15 @@ CONVEYOR_BELT_PIVOTS = 5
 
 DRILL_ARM_POWER = 0.5
 DRILL_POWER = 1.0
-CONVEYOR_BELT_POWER = 0.5
+#CONVEYOR_BELT_POWER = 0
 
 
 #CONVEYOR_OFFSET = 10
 #CONVEYOR_SLOPE = 8
-CONVEYOR_POSITIONS = ['0', '1', '2', '3', '4', '5']
+CONVEYOR_POSITIONS = ['58', '77', '99', '118', '143', '30']
 
-LAZY_SUSAN_OFFSET = 5
-LAZY_SUSAN_SLOPE = 7
+LAZY_SUSAN_OFFSET = 0
+LAZY_SUSAN_SLOPE = 9
 
 SENSOR_TELEM = 0x16
 
@@ -93,7 +93,7 @@ def set_servo_pos(bus: can.Bus, servo_id, pos):
 
 def set_servo_power(bus: can.Bus, servo_id, power):
     assert isinstance(power, int)
-    power_int = int(round((2**15 - 1) * power))
+    power_int = int(power)
     data = [0x0E, servo_id, power_int]
     can_id = construct_can_id(SCIENCE_GROUP, SCIENCE_SERIAL)
     message = can.Message(arbitration_id=can_id, is_extended_id=False, data=data)
@@ -154,7 +154,7 @@ async def key_pressed(args, bus: can.Bus, key: str):
         set_motor_power(bus, DRILL_SERIAL, power)
     elif key == "u" or key == "j":
         #continuous conveyor belt
-        power = CONVEYOR_BELT_POWER * (1 if key == "u" else -1)
+        power = (0 if key == "u" else 180)
         set_servo_power(bus, CAN_CONVEYOR_BELT_CONT, int(power))
     elif key == "i":
         #positional conveyor belt positive direction
@@ -200,7 +200,11 @@ async def key_released(args, bus, key):
     elif key == "w" or key == "s":
         set_motor_power(bus, DRILL_SERIAL, 0.0)
     elif key == "u" or key == "j":
-        set_servo_power(bus, CAN_CONVEYOR_BELT_CONT, 0)
+        set_servo_power(bus, CAN_CONVEYOR_BELT_CONT, 90)
+
+def telem_callback(msg: can.Message):
+    # print the telemetry info
+    pass
 
 @contextmanager
 def get_bus(args):
@@ -243,6 +247,9 @@ async def main():
         init_motors(bus)
         press_callback = functools.partial(key_pressed, args, bus)
         release_callback = functools.partial(key_released, args, bus)
+        notifier = can.Notifier(bus, [telem_callback], loop=asyncio.get_running_loop())
+        ...
+        notifier.stop()
         await sshkeyboard.listen_keyboard_manual(
             on_press=press_callback,
             on_release=release_callback,
