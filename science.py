@@ -21,7 +21,7 @@ DRILL_POWER = 1.0
 CONVEYOR_POSITIONS = ['58', '77', '99', '118', '143', '30']
 
 LAZY_SUSAN_OFFSET = 0
-LAZY_SUSAN_SLOPE = 9
+LAZY_SUSAN_SLOPE = 9.13
 
 SENSOR_TELEM = 0x16
 
@@ -38,7 +38,7 @@ SCIENCE_SERVO_CONT = 0x0E
 SCIENCE_SERVO_SET = 0x0D
 
 CAN_CONVEYOR_BELT_CONT = 0x4
-CAN_CONVEYOR_BELT_PIVOT = 0x3
+CAN_CONVEYOR_BELT_PIVOT = 0x0
 CAN_SCIENCE_SERVO_LAZY_SUSAN = 0x0
 
 # conveyor belt pivot servo positions
@@ -178,7 +178,7 @@ async def key_pressed(args, bus: can.Bus, key: str):
         first_cup_idx += 1  
         if first_cup_idx == N_SLOTS:
             first_cup_idx = 0
-        first_cup_pos = LAZY_SUSAN_SLOPE * first_cup_idx + LAZY_SUSAN_OFFSET
+        first_cup_pos = int(LAZY_SUSAN_SLOPE * first_cup_idx) + LAZY_SUSAN_OFFSET
         print(f"Moving first cup to slot {first_cup_idx}")
         set_servo_pos(bus, CAN_SCIENCE_SERVO_LAZY_SUSAN, int(first_cup_pos))
     elif key == "left":
@@ -186,7 +186,7 @@ async def key_pressed(args, bus: can.Bus, key: str):
         if first_cup_idx == -1:
             first_cup_idx = N_SLOTS - 1
         print(f"Moving first cup to slot {first_cup_idx}")
-        first_cup_pos = LAZY_SUSAN_SLOPE * first_cup_idx + LAZY_SUSAN_OFFSET
+        first_cup_pos = int(LAZY_SUSAN_SLOPE * first_cup_idx) + LAZY_SUSAN_OFFSET
         set_servo_pos(bus, CAN_SCIENCE_SERVO_LAZY_SUSAN, int(first_cup_pos))
     elif key == "1":
         print(f"receiving sensor reading for _")
@@ -203,8 +203,10 @@ async def key_released(args, bus, key):
         set_servo_power(bus, CAN_CONVEYOR_BELT_CONT, 90)
 
 def telem_callback(msg: can.Message):
-    # print the telemetry info
-    pass
+    data = msg.data
+    if data[0] == 0xf6:
+        value = int.from_bytes(bytes(data[-4:]), byteorder="big")
+        print(f"({data[1]:x}, {data[2]:x}): telem type={data[3]:x}, sensor reading={value}")
 
 @contextmanager
 def get_bus(args):
@@ -214,6 +216,12 @@ def get_bus(args):
     else:
         with can.Bus(channel="can0", interface="socketcan") as bus:
             yield bus
+
+@contextmanager
+def create_notifier(bus: can.BusABC):
+    notifier = can.Notifier(bus, [], loop=asyncio.get_running_loop())
+    yield notifier
+    notifier.stop()
 
 
 async def main():
@@ -244,18 +252,17 @@ async def main():
             print("Invalid input! Try again.")
 
     with get_bus(args) as bus:
-        init_motors(bus)
-        press_callback = functools.partial(key_pressed, args, bus)
-        release_callback = functools.partial(key_released, args, bus)
-        notifier = can.Notifier(bus, [telem_callback], loop=asyncio.get_running_loop())
-        ...
-        notifier.stop()
-        await sshkeyboard.listen_keyboard_manual(
-            on_press=press_callback,
-            on_release=release_callback,
-            sequential=True,
-            delay_second_char=0.05,
-        )
+        with create_notifier(bus) as notifier:
+            notifier.add_listener(telem_callback)
+            init_motors(bus)
+            press_callback = functools.partial(key_pressed, args, bus)
+            release_callback = functools.partial(key_released, args, bus)
+            await sshkeyboard.listen_keyboard_manual(
+                on_press=press_callback,
+                on_release=release_callback,
+                sequential=True,
+                delay_second_char=0.05,
+            )
 
 
 
