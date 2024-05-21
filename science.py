@@ -231,6 +231,8 @@ async def main():
     global conveyor_belt_idx
     global first_cup_pos
     global conveyor_belt_pivot
+    #open judges sample (wait), set to first position, set lazy susan to first position
+    #fix lazy susan positons
     while (first_cup_idx is None) or (conveyor_belt_idx is None):
         try:
             print(first_cup_idx)
