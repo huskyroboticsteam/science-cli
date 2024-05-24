@@ -18,8 +18,10 @@ DRILL_POWER = 1.0
 
 #CONVEYOR_OFFSET = 10
 #CONVEYOR_SLOPE = 8
-CONVEYOR_POSITIONS = ['58', '77', '99', '118', '143', '30']
+CONVEYOR_POSITIONS = [58, 77, 99, 118, 143]
 
+#conveyor_belt_idx set to -1 if set to away
+CONVEYOR_AWAY = 30
 LAZY_SUSAN_OFFSET = 0
 LAZY_SUSAN_SLOPE = 9.13
 
@@ -40,6 +42,7 @@ SCIENCE_SERVO_SET = 0x0D
 CAN_CONVEYOR_BELT_CONT = 0x4
 CAN_CONVEYOR_BELT_PIVOT = 0x0
 CAN_SCIENCE_SERVO_LAZY_SUSAN = 0x0
+CAN_SAMPLE_LID = 0x2
 
 # conveyor belt pivot servo positions
 # conveyor belt continuous turn
@@ -128,8 +131,6 @@ def get_sensor_reading(bus: can.Bus):
     can_id = construct_can_id(SCIENCE_GROUP, SCIENCE_SERIAL)
     message = can.Message(arbitration_id=can_id, is_extended_id=False, data=data)
     bus.send(message)
-    # send telem request
-    #print sensor reading to console"""
 
 
 def init_motors(bus: can.Bus):
@@ -158,7 +159,10 @@ async def key_pressed(args, bus: can.Bus, key: str):
         set_servo_power(bus, CAN_CONVEYOR_BELT_CONT, int(power))
     elif key == "i":
         #positional conveyor belt positive direction
-        conveyor_belt_idx += 1
+        if (conveyor_belt_idx == -1):
+            conveyor_belt_idx = 0
+        else:
+            conveyor_belt_idx += 1
         if (conveyor_belt_idx >= CONVEYOR_BELT_PIVOTS or conveyor_belt_idx < 0):
             print(f"Conveyor belt index out of range. Choose different index.")
         else:
@@ -167,7 +171,10 @@ async def key_pressed(args, bus: can.Bus, key: str):
             set_servo_pos(bus, CAN_CONVEYOR_BELT_PIVOT, conveyor_belt_pivot)
     elif key == "k":
         #positional conveyor belt negative direction
-        conveyor_belt_idx -= 1
+        if (conveyor_belt_idx == -1):
+            conveyor_belt_idx = 0
+        else:
+            conveyor_belt_idx -= 1
         if (conveyor_belt_idx >= CONVEYOR_BELT_PIVOTS or conveyor_belt_idx < 0):
             print(f"Conveyor belt index out of range. Choose different index.")
         else:
@@ -188,6 +195,17 @@ async def key_pressed(args, bus: can.Bus, key: str):
         print(f"Moving first cup to slot {first_cup_idx}")
         first_cup_pos = int(LAZY_SUSAN_SLOPE * first_cup_idx) + LAZY_SUSAN_OFFSET
         set_servo_pos(bus, CAN_SCIENCE_SERVO_LAZY_SUSAN, int(first_cup_pos))
+    elif key == "o" or key == "l":
+        # move conveyor belt to away position and wait
+        if (conveyor_belt_idx != -1):
+            print(f"moving conveyor belt out of way")
+            conveyor_belt_idx = -1
+            set_servo_pos(bus, CAN_CONVEYOR_BELT_PIVOT, CONVEYOR_AWAY)
+            await asyncio.sleep(3) 
+        # open/close lid
+        print(f"Opening/closing lid")
+        pos = (120 if key == "o" else 155)
+        set_servo_pos(bus, CAN_SAMPLE_LID, pos)
     elif key == "1":
         print(f"receiving sensor reading for _")
         get_sensor_reading(bus)
@@ -232,8 +250,8 @@ async def main():
     global first_cup_pos
     global conveyor_belt_pivot
     #open judges sample (wait), set to first position, set lazy susan to first position
-    #fix lazy susan positons
-    while (first_cup_idx is None) or (conveyor_belt_idx is None):
+    
+    """while (first_cup_idx is None) or (conveyor_belt_idx is None):
         try:
             print(first_cup_idx)
             print(conveyor_belt_idx)
@@ -249,22 +267,37 @@ async def main():
                     conveyor_belt_idx = None
                     print(f"Valid indices are in between 0 and {CONVEYOR_BELT_PIVOTS-1}. Try again.")
                 else:
-                    conveyor_belt_pivot = int(CONVEYOR_POSITIONS[conveyor_belt_idx])
+                    conveyor_belt_pivot = int(CONVEYOR_POSITIONS[conveyor_belt_idx]) 
         except ValueError:  
-            print("Invalid input! Try again.")
+            print("Invalid input! Try again.") """
 
     with get_bus(args) as bus:
-        with create_notifier(bus) as notifier:
-            notifier.add_listener(telem_callback)
-            init_motors(bus)
-            press_callback = functools.partial(key_pressed, args, bus)
-            release_callback = functools.partial(key_released, args, bus)
-            await sshkeyboard.listen_keyboard_manual(
-                on_press=press_callback,
-                on_release=release_callback,
-                sequential=True,
-                delay_second_char=0.05,
-            )
+        # move conveyor belt to away position and wait
+        set_servo_pos(bus, CAN_CONVEYOR_BELT_PIVOT, CONVEYOR_AWAY)
+        conveyor_belt_idx = -1
+        await asyncio.sleep(3)
+        # open judges sample
+        set_servo_pos(bus, CAN_SAMPLE_LID, 120)
+        await asyncio.sleep(3)
+        #move conveyor belt to first positon
+        set_servo_pos(bus, CAN_CONVEYOR_BELT_PIVOT, 58)
+        conveyor_belt_idx = 1
+        conveyor_belt_pos = 58
+        #move lazy susan to first position
+        set_servo_pos(bus, CAN_SCIENCE_SERVO_LAZY_SUSAN, int(9.13))
+        first_cup_idx = 1
+        first_cup_pos = int(9.13)
+        #with create_notifier(bus) as notifier:
+         #   notifier.add_listener(telem_callback)
+        init_motors(bus)
+        press_callback = functools.partial(key_pressed, args, bus)
+        release_callback = functools.partial(key_released, args, bus)
+        await sshkeyboard.listen_keyboard_manual(
+            on_press=press_callback,
+            on_release=release_callback,
+            sequential=True,
+            delay_second_char=0.05,
+        )
 
 
 
