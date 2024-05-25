@@ -305,8 +305,9 @@ async def main():
         set_servo_pos(bus, CAN_SCIENCE_SERVO_LAZY_SUSAN, int(9.13))
         first_cup_idx = 1
         first_cup_pos = int(9.13)
+        #with create_notifier(bus) as notifier:
         #notifier.add_listener(telem_callback)
-            #init_motors(bus)
+        init_motors(bus)
         press_callback = functools.partial(key_pressed, args, bus)
         release_callback = functools.partial(key_released, args, bus)
         await sshkeyboard.listen_keyboard_manual(
