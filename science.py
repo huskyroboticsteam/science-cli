@@ -142,8 +142,8 @@ def init_motors(bus: can.Bus):
 
 async def key_pressed(args, bus: can.Bus, key: str):
     global first_cup_idx
-    global conveyor_belt_idx
     global first_cup_pos
+    global conveyor_belt_idx
     global conveyor_belt_pivot
     if args.debug:
         print(f"Pressed: {key}")
@@ -185,16 +185,22 @@ async def key_pressed(args, bus: can.Bus, key: str):
         first_cup_idx += 1  
         if first_cup_idx == N_SLOTS:
             first_cup_idx = 0
+        original_pos = first_cup_pos
         first_cup_pos = int(LAZY_SUSAN_SLOPE * first_cup_idx) + LAZY_SUSAN_OFFSET
         print(f"Moving first cup to slot {first_cup_idx}")
-        set_servo_pos(bus, CAN_SCIENCE_SERVO_LAZY_SUSAN, int(first_cup_pos))
+        rotate_task = asyncio.create_task(rotate_lazy_susan(bus, original_pos, first_cup_pos, 1))
+        await rotate_task
+        #set_servo_pos(bus, CAN_SCIENCE_SERVO_LAZY_SUSAN, int(first_cup_pos))
     elif key == "left":
         first_cup_idx -= 1 
         if first_cup_idx == -1:
             first_cup_idx = N_SLOTS - 1
-        print(f"Moving first cup to slot {first_cup_idx}")
+        original_pos = first_cup_pos
         first_cup_pos = int(LAZY_SUSAN_SLOPE * first_cup_idx) + LAZY_SUSAN_OFFSET
-        set_servo_pos(bus, CAN_SCIENCE_SERVO_LAZY_SUSAN, int(first_cup_pos))
+        print(f"Moving first cup to slot {first_cup_idx}")
+        rotate_task = asyncio.create_task(rotate_lazy_susan(bus, original_pos, first_cup_pos, -1))
+        await rotate_task
+        #set_servo_pos(bus, CAN_SCIENCE_SERVO_LAZY_SUSAN, int(first_cup_pos))
     elif key == "o" or key == "l":
         # move conveyor belt to away position and wait
         if (conveyor_belt_idx != -1):
@@ -219,6 +225,18 @@ async def key_released(args, bus, key):
         set_motor_power(bus, DRILL_SERIAL, 0.0)
     elif key == "u" or key == "j":
         set_servo_power(bus, CAN_CONVEYOR_BELT_CONT, 90)
+
+async def rotate_lazy_susan(bus, start, target, direction):
+    curr_target = start
+    if (direction < 0):
+        while (curr_target > target):
+            curr_target += direction
+            set_servo_pos(bus, CAN_SCIENCE_SERVO_LAZY_SUSAN, int(curr_target))
+    else:
+        while (curr_target < target):
+            curr_target += direction
+            set_servo_pos(bus, CAN_SCIENCE_SERVO_LAZY_SUSAN, int(curr_target))
+
 
 def telem_callback(msg: can.Message):
     data = msg.data
@@ -287,9 +305,8 @@ async def main():
         set_servo_pos(bus, CAN_SCIENCE_SERVO_LAZY_SUSAN, int(9.13))
         first_cup_idx = 1
         first_cup_pos = int(9.13)
-        #with create_notifier(bus) as notifier:
-         #   notifier.add_listener(telem_callback)
-        init_motors(bus)
+        #notifier.add_listener(telem_callback)
+            #init_motors(bus)
         press_callback = functools.partial(key_pressed, args, bus)
         release_callback = functools.partial(key_released, args, bus)
         await sshkeyboard.listen_keyboard_manual(
