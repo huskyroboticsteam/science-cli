@@ -15,16 +15,23 @@ DRILL_POWER = 1.0
 MOTOR_GROUP = 0x4
 SCIENCE_GROUP = 0x7
 SCIENCE_SERIAL = 0x1
-DRILL_ARM_SERIAL = 0xC
-DRILL_SERIAL = 0xD
+DRILL_ARM_SERIAL = 0xD
+DRILL_SERIAL = 0xE
 
-DRILL_COVER_SERVO_ID = 0x5
+PANO_CAM_SERVO_ID = 0x6
+SAMPLE_CUP_SERVO_ID = 0x7
+
+SAMPLE_CUP_POSITIONS = [0, 60, 120]
+PANO_SPEED = 45 # deg/s
+PANO_MIN_MAX = (0, 180)
+
+SENSOR_TELEM_TYPES = [0x16]
 
 # associates serial with cyclic send task
 can_resend_tasks: typing.Dict[int, can.CyclicSendTaskABC] = {}
-
-# position of the first cup, in the range [0, N_SLOTS)
-first_cup_idx = None
+# tracked by the pano control ask
+pano_servo_setpoint = 0
+pano_servo_speed = 0
 
 
 class MockBus(can.BusABC):
@@ -32,7 +39,7 @@ class MockBus(can.BusABC):
         super().__init__(channel="foobar")
 
     def send(self, message, timeout=None):
-        print(message.dlc, message.data)
+        print([hex(x) for x in message.data])
 
     def _recv_internal(self, timeout=None):
         return None
@@ -57,17 +64,8 @@ def get_args():
 
 
 def set_servo_pos(bus: can.Bus, servo_id, pos):
-    assert isinstance(pos, int) and pos > 0 and (0xFF & pos) == pos
+    assert isinstance(pos, int) and pos >= 0 and (0xFF & pos) == pos, pos
     data = [0x0D, servo_id, pos]
-    can_id = construct_can_id(SCIENCE_GROUP, SCIENCE_SERIAL)
-    message = can.Message(arbitration_id=can_id, is_extended_id=False, data=data)
-    bus.send(message)
-
-
-def move_cup(bus: can.Bus, cup_idx):
-    print(f"Moving first cup to slot {first_cup_idx}")
-    assert cup_idx == (cup_idx & 0xFF)
-    data = [0xC, cup_idx]
     can_id = construct_can_id(SCIENCE_GROUP, SCIENCE_SERIAL)
     message = can.Message(arbitration_id=can_id, is_extended_id=False, data=data)
     bus.send(message)
@@ -85,6 +83,12 @@ def set_motor_power(bus: can.Bus, serial, power):
     else:
         bus.send(message)
 
+def send_telem_pull(bus: can.Bus, group, serial, telem_type):
+    can_id = construct_can_id(group, serial)
+    data = [0xf5, 0x2, 0x1, telem_type]
+    message = can.Message(arbitration_id=can_id, is_extended_id=False, data=data)
+    bus.send(message)
+
 
 def init_motors(bus: can.Bus):
     for serial in [DRILL_ARM_SERIAL, DRILL_SERIAL]:
@@ -94,28 +98,38 @@ def init_motors(bus: can.Bus):
         bus.send(message)
 
 
+async def pano_control_task(bus: can.Bus):
+    ctrl_hz = 5
+    while True:
+        await asyncio.sleep(1 / ctrl_hz)
+        global pano_servo_setpoint
+        setpoint = max(PANO_MIN_MAX[0], min(PANO_MIN_MAX[1], pano_servo_setpoint + pano_servo_speed / ctrl_hz))
+        if setpoint != pano_servo_setpoint:
+            pano_servo_setpoint = setpoint
+            set_servo_pos(bus, PANO_CAM_SERVO_ID, int(pano_servo_setpoint))
+
+
 async def key_pressed(args, bus: can.Bus, key: str):
-    global first_cup_idx
     if args.debug:
         print(f"Pressed: {key}")
-    if key == "up" or key == "down":
-        power = DRILL_ARM_POWER * (1 if key == "up" else -1)
+    if key == "w" or key == "s":
+        power = DRILL_ARM_POWER * (1 if key == "w" else -1)
         set_motor_power(bus, DRILL_ARM_SERIAL, power)
-    elif key == "w" or key == "s":
-        power = DRILL_POWER * (1 if key == "w" else -1)
+    elif key == " " or key == "z":
+        power = DRILL_POWER * (1 if key == " " else -1)
         set_motor_power(bus, DRILL_SERIAL, power)
-    elif key == "a" or key == "d":
-        set_servo_pos(bus, DRILL_COVER_SERVO_ID, 90 if key == "a" else 180)
-    elif key == "right":
-        first_cup_idx += 1
-        if first_cup_idx == N_SLOTS:
-            first_cup_idx = 0
-        move_cup(bus, first_cup_idx)
-    elif key == "left":
-        first_cup_idx -= 1
-        if first_cup_idx == -1:
-            first_cup_idx = N_SLOTS - 1
-        move_cup(bus, first_cup_idx)
+    elif key == "left" or key == "right":
+        global pano_servo_speed
+        pano_servo_speed = PANO_SPEED * (1 if key == "right" else -1)
+    elif key.isdigit():
+        cup_idx = int(key) - 1
+        if 0 <= cup_idx < len(SAMPLE_CUP_POSITIONS):
+            set_servo_pos(bus, SAMPLE_CUP_SERVO_ID, SAMPLE_CUP_POSITIONS[cup_idx])
+        else:
+            print(f"Invalid cup index: {cup_idx}")
+    elif key == " ":
+        for telem_type in SENSOR_TELEM_TYPES:
+            send_telem_pull(bus, SCIENCE_GROUP, SCIENCE_SERIAL, telem_type)
 
 
 async def key_released(args, bus, key):
@@ -125,7 +139,15 @@ async def key_released(args, bus, key):
         set_motor_power(bus, DRILL_ARM_SERIAL, 0.0)
     elif key == "w" or key == "s":
         set_motor_power(bus, DRILL_SERIAL, 0.0)
+    elif key == "left" or key == "right":
+        global pano_servo_speed
+        pano_servo_speed = 0
 
+def telem_callback(msg: can.Message):
+    data = msg.data
+    if data[0] == 0xf6:
+        value = int.from_bytes(bytes(data[-4:]), byteorder="big")
+        print(f"({data[1]:x}, {data[2]:x}): telem type={data[3]:x}, sensor reading={value}")
 
 @contextmanager
 def get_bus(args):
@@ -137,29 +159,39 @@ def get_bus(args):
             yield bus
 
 
+@contextmanager
+def create_notifier(bus: can.BusABC):
+    notifier = can.Notifier(bus, [], loop=asyncio.get_running_loop())
+    yield notifier
+    notifier.stop()
+
 async def main():
     args = get_args()
 
-    global first_cup_idx
-    while first_cup_idx is None:
-        try:
-            first_cup_idx = int(input("What is the position of the first cup? "))
-            if not 0 <= first_cup_idx < N_SLOTS:
-                first_cup_idx = None
-                print(f"Valid slots are in between 0 and {N_SLOTS-1}. Try again.")
-        except ValueError:
-            print("Invalid input! Try again.")
-
     with get_bus(args) as bus:
-        init_motors(bus)
-        press_callback = functools.partial(key_pressed, args, bus)
-        release_callback = functools.partial(key_released, args, bus)
-        await sshkeyboard.listen_keyboard_manual(
-            on_press=press_callback,
-            on_release=release_callback,
-            sequential=True,
-            delay_second_char=0.05,
-        )
+        with create_notifier(bus) as notifier:
+            notifier.add_listener(telem_callback)
+            init_motors(bus)
+
+            # initialize servos
+            set_servo_pos(bus, SAMPLE_CUP_SERVO_ID, SAMPLE_CUP_POSITIONS[0])
+            set_servo_pos(bus, PANO_CAM_SERVO_ID, (PANO_MIN_MAX[0] + PANO_MIN_MAX[1]) // 2)
+            global pano_servo_setpoint
+            pano_servo_setpoint = (PANO_MIN_MAX[0] + PANO_MIN_MAX[1]) // 2
+
+            asyncio.create_task(pano_control_task(bus))
+
+            async def press_callback(key):
+                return await key_pressed(args, bus, key)
+            async def release_callback(key):
+                return await key_released(args, bus, key)
+
+            await sshkeyboard.listen_keyboard_manual(
+                on_press=press_callback,
+                on_release=release_callback,
+                sequential=True,
+                delay_second_char=0.05,
+            )
 
 
 if __name__ == "__main__":
