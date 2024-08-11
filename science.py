@@ -1,16 +1,14 @@
 #!venv/bin/python
 import argparse
 import asyncio
-import functools
 import typing
 from contextlib import contextmanager
 
 import can
 import sshkeyboard
 
-N_SLOTS = 12
 DRILL_ARM_POWER = 0.5
-DRILL_POWER = 1.0
+DRILL_POWER = -0.2
 
 MOTOR_GROUP = 0x4
 SCIENCE_GROUP = 0x7
@@ -18,20 +16,14 @@ SCIENCE_SERIAL = 0x1
 DRILL_ARM_SERIAL = 0xD
 DRILL_SERIAL = 0xE
 
-PANO_CAM_SERVO_ID = 0x6
-SAMPLE_CUP_SERVO_ID = 0x7
+PANO_CAM_SERVO_ID = 0x7
+SAMPLE_CUP_SERVO_ID = 0x3
 
-SAMPLE_CUP_POSITIONS = [0, 60, 120]
-PANO_SPEED = 45 # deg/s
-PANO_MIN_MAX = (0, 180)
-
-SENSOR_TELEM_TYPES = [0x16]
+PANO_SPEED = -10
+SAMPLE_CUP_SPEED = 30
 
 # associates serial with cyclic send task
 can_resend_tasks: typing.Dict[int, can.CyclicSendTaskABC] = {}
-# tracked by the pano control ask
-pano_servo_setpoint = 0
-pano_servo_speed = 0
 
 
 class MockBus(can.BusABC):
@@ -71,6 +63,14 @@ def set_servo_pos(bus: can.Bus, servo_id, pos):
     bus.send(message)
 
 
+def set_cont_servo_speed(bus: can.Bus, servo_id, speed):
+    assert isinstance(servo_id, int) and isinstance(speed, int) and -128 <= speed <= 127
+    data = [0x0E, servo_id, 0xFF & speed]
+    can_id = construct_can_id(SCIENCE_GROUP, SCIENCE_SERIAL)
+    message = can.Message(arbitration_id=can_id, is_extended_id=False, data=data)
+    bus.send(message)
+
+
 def set_motor_power(bus: can.Bus, serial, power):
     if serial in can_resend_tasks:
         can_resend_tasks[serial].stop()
@@ -83,12 +83,6 @@ def set_motor_power(bus: can.Bus, serial, power):
     else:
         bus.send(message)
 
-def send_telem_pull(bus: can.Bus, group, serial, telem_type):
-    can_id = construct_can_id(group, serial)
-    data = [0xf5, 0x2, 0x1, telem_type]
-    message = can.Message(arbitration_id=can_id, is_extended_id=False, data=data)
-    bus.send(message)
-
 
 def init_motors(bus: can.Bus):
     for serial in [DRILL_ARM_SERIAL, DRILL_SERIAL]:
@@ -98,56 +92,35 @@ def init_motors(bus: can.Bus):
         bus.send(message)
 
 
-async def pano_control_task(bus: can.Bus):
-    ctrl_hz = 5
-    while True:
-        await asyncio.sleep(1 / ctrl_hz)
-        global pano_servo_setpoint
-        setpoint = max(PANO_MIN_MAX[0], min(PANO_MIN_MAX[1], pano_servo_setpoint + pano_servo_speed / ctrl_hz))
-        if setpoint != pano_servo_setpoint:
-            pano_servo_setpoint = setpoint
-            set_servo_pos(bus, PANO_CAM_SERVO_ID, int(pano_servo_setpoint))
-
-
 async def key_pressed(args, bus: can.Bus, key: str):
     if args.debug:
         print(f"Pressed: {key}")
     if key == "w" or key == "s":
         power = DRILL_ARM_POWER * (1 if key == "w" else -1)
         set_motor_power(bus, DRILL_ARM_SERIAL, power)
-    elif key == " " or key == "z":
-        power = DRILL_POWER * (1 if key == " " else -1)
+    elif key == "space" or key == "z":
+        power = DRILL_POWER * (1 if key == "space" else -1)
         set_motor_power(bus, DRILL_SERIAL, power)
     elif key == "left" or key == "right":
-        global pano_servo_speed
-        pano_servo_speed = PANO_SPEED * (1 if key == "right" else -1)
-    elif key.isdigit():
-        cup_idx = int(key) - 1
-        if 0 <= cup_idx < len(SAMPLE_CUP_POSITIONS):
-            set_servo_pos(bus, SAMPLE_CUP_SERVO_ID, SAMPLE_CUP_POSITIONS[cup_idx])
-        else:
-            print(f"Invalid cup index: {cup_idx}")
-    elif key == " ":
-        for telem_type in SENSOR_TELEM_TYPES:
-            send_telem_pull(bus, SCIENCE_GROUP, SCIENCE_SERIAL, telem_type)
+        pos = 90 + PANO_SPEED * (1 if key == "right" else -1)
+        set_servo_pos(bus, PANO_CAM_SERVO_ID, pos)
+    elif key == "a" or key == "d":
+        pos = 90 + SAMPLE_CUP_SPEED * (1 if key == "d" else -1)
+        set_servo_pos(bus, SAMPLE_CUP_SERVO_ID, pos)
 
 
 async def key_released(args, bus, key):
     if args.debug:
         print(f"Released: {key}")
-    if key == "up" or key == "down":
-        set_motor_power(bus, DRILL_ARM_SERIAL, 0.0)
-    elif key == "w" or key == "s":
+    if key == "space" or key == "z":
         set_motor_power(bus, DRILL_SERIAL, 0.0)
+    elif key == "w" or key == "s":
+        set_motor_power(bus, DRILL_ARM_SERIAL, 0.0)
     elif key == "left" or key == "right":
-        global pano_servo_speed
-        pano_servo_speed = 0
+        set_servo_pos(bus, PANO_CAM_SERVO_ID, 90)
+    elif key == "a" or key == "d":
+        set_servo_pos(bus, SAMPLE_CUP_SERVO_ID, 90)
 
-def telem_callback(msg: can.Message):
-    data = msg.data
-    if data[0] == 0xf6:
-        value = int.from_bytes(bytes(data[-4:]), byteorder="big")
-        print(f"({data[1]:x}, {data[2]:x}): telem type={data[3]:x}, sensor reading={value}")
 
 @contextmanager
 def get_bus(args):
@@ -159,39 +132,27 @@ def get_bus(args):
             yield bus
 
 
-@contextmanager
-def create_notifier(bus: can.BusABC):
-    notifier = can.Notifier(bus, [], loop=asyncio.get_running_loop())
-    yield notifier
-    notifier.stop()
-
 async def main():
     args = get_args()
 
     with get_bus(args) as bus:
-        with create_notifier(bus) as notifier:
-            notifier.add_listener(telem_callback)
-            init_motors(bus)
+        init_motors(bus)
 
-            # initialize servos
-            set_servo_pos(bus, SAMPLE_CUP_SERVO_ID, SAMPLE_CUP_POSITIONS[0])
-            set_servo_pos(bus, PANO_CAM_SERVO_ID, (PANO_MIN_MAX[0] + PANO_MIN_MAX[1]) // 2)
-            global pano_servo_setpoint
-            pano_servo_setpoint = (PANO_MIN_MAX[0] + PANO_MIN_MAX[1]) // 2
+        # initialize servos
+        set_servo_pos(bus, PANO_CAM_SERVO_ID, 90)
+        set_servo_pos(bus, SAMPLE_CUP_SERVO_ID, 90)
 
-            asyncio.create_task(pano_control_task(bus))
+        async def press_callback(key):
+            return await key_pressed(args, bus, key)
+        async def release_callback(key):
+            return await key_released(args, bus, key)
 
-            async def press_callback(key):
-                return await key_pressed(args, bus, key)
-            async def release_callback(key):
-                return await key_released(args, bus, key)
-
-            await sshkeyboard.listen_keyboard_manual(
-                on_press=press_callback,
-                on_release=release_callback,
-                sequential=True,
-                delay_second_char=0.05,
-            )
+        await sshkeyboard.listen_keyboard_manual(
+            on_press=press_callback,
+            on_release=release_callback,
+            sequential=True,
+            delay_second_char=0.05,
+        )
 
 
 if __name__ == "__main__":
