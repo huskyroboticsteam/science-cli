@@ -1,0 +1,7 @@
+Welcome to science!
+
+Controls:
+    left/right : panorama camera
+           w/s : drill up/down
+           a/d : rotate sample cup
+       space/z : scoopp/unscoop

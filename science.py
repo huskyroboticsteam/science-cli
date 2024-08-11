@@ -20,7 +20,7 @@ PANO_CAM_SERVO_ID = 0x7
 SAMPLE_CUP_SERVO_ID = 0x3
 
 PANO_SPEED = -10
-SAMPLE_CUP_SPEED = 30
+SAMPLE_CUP_SPEED = -30
 
 # associates serial with cyclic send task
 can_resend_tasks: typing.Dict[int, can.CyclicSendTaskABC] = {}
@@ -35,6 +35,10 @@ class MockBus(can.BusABC):
 
     def _recv_internal(self, timeout=None):
         return None
+
+def print_ctrls():
+    with open("controls.txt", "r") as f:
+        print(f.read())
 
 
 def construct_can_id(group, serial):
@@ -134,6 +138,7 @@ def get_bus(args):
 
 async def main():
     args = get_args()
+    print_ctrls()
 
     with get_bus(args) as bus:
         init_motors(bus)
